@@ -147,8 +147,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if coordinator.assertion.isActive {
                 turnOff()
             } else {
-                turnOn()
+                activateWithDefaultDuration()
             }
+        }
+    }
+
+    private func activateWithDefaultDuration() {
+        let durationInMinutes = UserDefaults.standard.integer(forKey: "defaultActivationDuration")
+        if durationInMinutes > 0 {
+            let deadline = clock.now.addingTimeInterval(TimeInterval(durationInMinutes * 60))
+            coordinator.send(.userSelected(.until(deadline)))
+        } else {
+            coordinator.send(.userSelected(.indefinitely))
         }
     }
 
