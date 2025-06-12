@@ -54,4 +54,5 @@ This project is licensed under the MIT License.
 This is one of several projects I've built using this AI-driven development process. Check out the others:
 
 - [**AudioProfiles**](https://github.com/Zakay/AudioProfiles): A macOS utility to automatically switch audio devices based on location and connected hardware.
+- [**Swish**](https://github.com/Zakay/Swish): A macOS menu‑bar window manager that lets you swish windows into place—throw, resize, and move them across multiple monitors with keys or a flick of the mouse, no title bars or edges required.
 - *(More to come!)*
