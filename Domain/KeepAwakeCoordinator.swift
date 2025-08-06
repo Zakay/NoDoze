@@ -9,6 +9,8 @@ public final class KeepAwakeCoordinator {
     public let assertion: PowerAssertion
     public var deadline: Date? { model.deadline }
     public var isSmartModeEnabled: Bool { model.smartEnabled }
+    public var assertionAcquiredAt: Date? { _assertionAcquiredAt }
+    private var _assertionAcquiredAt: Date?
     private let screens: ScreenObserver
     private let clock: Clock
     private let store: Store
@@ -59,11 +61,13 @@ public final class KeepAwakeCoordinator {
             case .acquireAssertion(let until):
                 do {
                     try assertion.acquire(reason: "NoDoze KeepAwake", until: until)
+                    _assertionAcquiredAt = clock.now
                 } catch {
                     print("Failed to acquire assertion: \(error)")
                 }
             case .releaseAssertion:
                 assertion.release()
+                _assertionAcquiredAt = nil
             case .scheduleTimer(let date):
                 let interval = max(0, date.timeIntervalSince(clock.now))
                 timerToken?.cancel()

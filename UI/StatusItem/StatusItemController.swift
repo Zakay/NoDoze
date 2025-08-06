@@ -40,10 +40,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // --- Status Display ---
         if coordinator.assertion.isActive {
             if let deadline = coordinator.deadline {
-                let formatter = DateComponentsFormatter()
-                formatter.allowedUnits = [.hour, .minute]
-                formatter.unitsStyle = .abbreviated
-                let remaining = formatter.string(from: Date(), to: deadline) ?? ""
+                let remaining = formatRemainingTime(until: deadline)
                 statusItem.title = "Active for: \(remaining)"
             } else {
                 statusItem.title = "Active"
@@ -68,20 +65,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // --- Activation Submenu ---
         let activateMenu = NSMenu()
-        let durations = [
-            ("For 1 Hour", 60),
-            ("For 2 Hours", 120),
-            ("For 5 Hours", 300)
-        ]
-        for (title, minutes) in durations {
-            let item = NSMenuItem(title: title, action: #selector(durationSelected(_:)), keyEquivalent: "")
+        
+        // Use centralized duration configuration
+        for option in DurationConfiguration.allOptions {
+            let item = NSMenuItem(title: option.menuName, action: #selector(durationSelected(_:)), keyEquivalent: "")
             item.target = self
-            item.tag = minutes
+            item.tag = option.minutes
             activateMenu.addItem(item)
         }
-        let eodItem = NSMenuItem(title: "Until End of Day", action: #selector(endOfDay), keyEquivalent: "")
-        eodItem.target = self
-        activateMenu.addItem(eodItem)
 
         let activateItem = NSMenuItem(title: "Activate for…", action: nil, keyEquivalent: "")
         activateItem.submenu = activateMenu
@@ -108,8 +99,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func durationSelected(_ sender: NSMenuItem) {
-        let deadline = clock.now.addingTimeInterval(TimeInterval(sender.tag * 60))
-        coordinator.send(.userSelected(.until(deadline)))
+        if sender.tag == -1 {
+            // Special case: Until End of Day
+            endOfDay()
+        } else {
+            let deadline = clock.now.addingTimeInterval(TimeInterval(sender.tag * 60))
+            coordinator.send(.userSelected(.until(deadline)))
+        }
     }
 
     @objc private func endOfDay() {
@@ -153,7 +149,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func activateWithDefaultDuration() {
-        let durationInMinutes = UserDefaults.standard.integer(forKey: "defaultActivationDuration")
+        let durationInMinutes = DurationConfiguration.getDefaultDuration()
         if durationInMinutes > 0 {
             let deadline = clock.now.addingTimeInterval(TimeInterval(durationInMinutes * 60))
             coordinator.send(.userSelected(.until(deadline)))
@@ -165,6 +161,35 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func quit() {
         NSApp.terminate(nil)
     }
+    
+    // MARK: - Time Formatting
+    
+    private func formatRemainingTime(until deadline: Date) -> String {
+        let now = clock.now
+        let remainingSeconds = deadline.timeIntervalSince(now)
+        
+        guard remainingSeconds > 0 else { return "0s" }
+        
+        let totalSeconds = Int(remainingSeconds)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        
+        if hours > 0 {
+            // More than 1 hour: show "Xh Ym" format
+            if minutes > 0 {
+                return "\(hours)h \(minutes)m"
+            } else {
+                return "\(hours)h"
+            }
+        } else if minutes > 0 {
+            // Less than 1 hour but more than 1 minute: show only minutes
+            return "\(minutes)m"
+        } else {
+            // Less than 1 minute: show seconds
+            return "\(seconds)s"
+        }
+    }
 
     @objc private func stateChanged() {
         updateIcon()
@@ -173,6 +198,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if coordinator.assertion.isActive, coordinator.deadline != nil {
             displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
                 self?.updateMenu()
+                self?.updateIcon() // Update progress indicator every second
             }
         }
     }
@@ -180,7 +206,118 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func updateIcon() {
         let iconName = coordinator.assertion.isActive ? "sun.max.fill" : "moon.zzz.fill"
         let image = NSImage(systemSymbolName: iconName, accessibilityDescription: "NoDoze")
-        image?.isTemplate = true
-        item.button?.image = image
+        
+        if coordinator.assertion.isActive && coordinator.deadline != nil {
+            // Create a composite image with progress indicator
+            item.button?.image = createProgressIcon(baseImage: image)
+        } else {
+            // Use template for normal state
+            image?.isTemplate = true
+            item.button?.image = image
+        }
+    }
+    
+    private func createProgressIcon(baseImage: NSImage?) -> NSImage? {
+        guard let baseImage = baseImage else { return nil }
+        
+        // Use a size that works well with the menubar
+        let size = NSSize(width: 20, height: 20)
+        let compositeImage = NSImage(size: size)
+        
+        compositeImage.lockFocus()
+        
+        // Calculate progress
+        let progress = calculateProgress()
+        
+        // Draw background progress indicator
+        if progress > 0 {
+            // Create a more prominent background
+            let rect = NSRect(x: 1, y: 1, width: 18, height: 18)
+            let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+            
+            // More vibrant colors with better contrast
+            let color: NSColor
+            if progress > 0.5 {
+                color = NSColor.systemYellow
+            } else if progress > 0.2 {
+                color = NSColor.systemOrange
+            } else {
+                color = NSColor.systemRed
+            }
+            
+            // Draw the border first (darker version of the color)
+            let borderColor = color.withAlphaComponent(0.7)
+            borderColor.setStroke()
+            path.lineWidth = 1.5
+            path.stroke()
+            
+            // Draw the progress fill (only the filled portion)
+            let fillRect = NSRect(
+                x: rect.minX + 1,
+                y: rect.minY + 1,
+                width: (rect.width - 2) * progress,
+                height: rect.height - 2
+            )
+            
+            if progress > 0 {
+                let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: 2, yRadius: 2)
+                color.setFill()
+                fillPath.fill()
+            }
+        }
+        
+        // Draw the icon on top - center it properly
+        let iconSize: CGFloat = 12
+        let iconX = (size.width - iconSize) / 2
+        let iconY = (size.height - iconSize) / 2
+        let iconRect = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
+        
+        // Draw a proper white sun icon manually
+        NSColor.white.set()
+        
+        let centerX = iconRect.midX
+        let centerY = iconRect.midY
+        let innerRadius: CGFloat = 2.5
+        let rayStartRadius: CGFloat = 3.5
+        let rayEndRadius: CGFloat = 5.5
+        
+        // Draw the main sun circle first
+        let sunCircle = NSBezierPath(ovalIn: NSRect(x: centerX - innerRadius, y: centerY - innerRadius, width: innerRadius * 2, height: innerRadius * 2))
+        sunCircle.fill()
+        
+        // Draw sun rays as separate lines that don't connect to the circle
+        for i in 0..<8 {
+            let angle = Double(i) * .pi / 4
+            let rayStartX = centerX + cos(angle) * rayStartRadius
+            let rayStartY = centerY + sin(angle) * rayStartRadius
+            let rayEndX = centerX + cos(angle) * rayEndRadius
+            let rayEndY = centerY + sin(angle) * rayEndRadius
+            
+            // Create a simple straight ray line
+            let rayPath = NSBezierPath()
+            rayPath.move(to: NSPoint(x: rayStartX, y: rayStartY))
+            rayPath.line(to: NSPoint(x: rayEndX, y: rayEndY))
+            
+            rayPath.lineWidth = 1.5
+            rayPath.stroke()
+        }
+        
+        compositeImage.unlockFocus()
+        
+        return compositeImage
+    }
+    
+    private func calculateProgress() -> Double {
+        guard let deadline = coordinator.deadline else { return 0 }
+        guard let acquiredAt = coordinator.assertionAcquiredAt else { return 0 }
+        
+        let now = clock.now
+        let totalDuration = deadline.timeIntervalSince(acquiredAt)
+        let remaining = deadline.timeIntervalSince(now)
+        
+        guard totalDuration > 0 else { return 0 }
+        
+        let progress = max(0, min(1, remaining / totalDuration))
+        return progress
     }
 }
