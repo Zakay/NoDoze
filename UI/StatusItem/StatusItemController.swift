@@ -50,6 +50,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         statusItem.isEnabled = false
         menu.addItem(statusItem)
+        
+        // --- Extend Timer (only when active with deadline) ---
+        if coordinator.assertion.isActive && coordinator.deadline != nil {
+            let extendItem = NSMenuItem(title: "Add 1 Hour", action: #selector(extendTimer), keyEquivalent: "")
+            extendItem.target = self
+            menu.addItem(extendItem)
+        }
+        
         menu.addItem(NSMenuItem.separator())
         
         // --- Toggle Item ---
@@ -81,7 +89,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // --- Settings ---
-        let smartItem = NSMenuItem(title: "Intelligent Mode", action: #selector(toggleSmart), keyEquivalent: "")
+        let smartItem = NSMenuItem(title: "Respect Display Sleep", action: #selector(toggleSmart), keyEquivalent: "")
         smartItem.target = self
         smartItem.state = coordinator.isSmartModeEnabled ? .on : .off
         menu.addItem(smartItem)
@@ -158,6 +166,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    @objc private func extendTimer() {
+        guard let currentDeadline = coordinator.deadline else { return }
+        
+        // Add 1 hour to the current deadline
+        let newDeadline = currentDeadline.addingTimeInterval(3600) // 1 hour in seconds
+        coordinator.send(.userSelected(.until(newDeadline)))
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -196,9 +212,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         
         displayTimer?.invalidate()
         if coordinator.assertion.isActive, coordinator.deadline != nil {
-            displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            // Check if we're in the last minute to determine timer frequency
+            let isLastMinute = isInLastMinute()
+            let timerInterval = isLastMinute ? 0.05 : 1.0 // 20Hz for last minute, 1Hz otherwise
+            
+            displayTimer = Timer.scheduledTimer(withTimeInterval: timerInterval, repeats: true) { [weak self] _ in
                 self?.updateMenu()
-                self?.updateIcon() // Update progress indicator every second
+                self?.updateIcon() // Update progress indicator and pulsing every timer tick
             }
         }
     }
@@ -228,6 +248,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         
         // Calculate progress
         let progress = calculateProgress()
+        let isLastMinute = isInLastMinute()
+        
+        // Calculate pulsing effect for last minute - ANIMATION
+        let pulseIntensity: CGFloat
+        if isLastMinute {
+            let time = Date().timeIntervalSince1970
+            let pulse = sin(time * 8) * 0.5 + 0.5 // 4Hz for a pleasant animation
+            pulseIntensity = pulse
+        } else {
+            pulseIntensity = 0
+        }
         
         // Draw background progress indicator
         if progress > 0 {
@@ -235,14 +266,61 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let rect = NSRect(x: 1, y: 1, width: 18, height: 18)
             let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
             
-            // More vibrant colors with better contrast
-            let color: NSColor
+            // Base colors
+            let baseColor: NSColor
             if progress > 0.5 {
-                color = NSColor.systemYellow
+                baseColor = NSColor.systemYellow
             } else if progress > 0.2 {
-                color = NSColor.systemOrange
+                baseColor = NSColor.systemOrange
             } else {
-                color = NSColor.systemRed
+                baseColor = NSColor.systemRed
+            }
+            
+            // Apply pulsing effect to the primary color - SMOOTH GRADIENTS
+            let color: NSColor
+            if isLastMinute {
+                // Create smooth gradient transitions using alpha blending
+                if progress > 0.5 {
+                    // Yellow with smooth brightness gradient
+                    let alpha = 0.6 + pulseIntensity * 0.4 // Smooth alpha gradient
+                    color = baseColor.withAlphaComponent(alpha)
+                } else if progress > 0.2 {
+                    // Orange with smooth transition to yellow
+                    let transition = pulseIntensity * 0.8 // Smooth transition factor
+                    if transition > 0.5 {
+                        // Blend between orange and yellow
+                        let yellowAlpha = (transition - 0.5) * 2 // 0 to 1
+                        let orangeAlpha = 1.0 - yellowAlpha
+                        color = NSColor.systemOrange.withAlphaComponent(0.6 + orangeAlpha * 0.4)
+                    } else {
+                        // Pure orange with brightness
+                        let alpha = 0.6 + transition * 0.4
+                        color = baseColor.withAlphaComponent(alpha)
+                    }
+                } else {
+                    // Red with smooth transition to orange
+                    let transition = pulseIntensity * 0.8 // Smooth transition factor
+                    if transition > 0.5 {
+                        // Blend between red and orange
+                        let orangeAlpha = (transition - 0.5) * 2 // 0 to 1
+                        let redAlpha = 1.0 - orangeAlpha
+                        color = NSColor.systemOrange.withAlphaComponent(0.6 + orangeAlpha * 0.4)
+                    } else {
+                        // Pure red with brightness
+                        let alpha = 0.6 + transition * 0.4
+                        color = baseColor.withAlphaComponent(alpha)
+                    }
+                }
+            } else {
+                color = baseColor
+            }
+            
+            // Background glow effect - SMOOTH GRADIENT
+            if isLastMinute {
+                let glowAlpha = 0.1 + pulseIntensity * 0.3 // Smooth background gradient
+                let glowColor = baseColor.withAlphaComponent(glowAlpha)
+                glowColor.setFill()
+                path.fill()
             }
             
             // Draw the border first (darker version of the color)
@@ -251,7 +329,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             path.lineWidth = 1.5
             path.stroke()
             
-            // Draw the progress fill (only the filled portion)
+            // Draw the progress fill (only the filled portion) - SMOOTH GRADIENTS
             let fillRect = NSRect(
                 x: rect.minX + 1,
                 y: rect.minY + 1,
@@ -261,7 +339,47 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             
             if progress > 0 {
                 let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: 2, yRadius: 2)
-                color.setFill()
+                
+                // Apply pulsing to the fill color as well - SMOOTH GRADIENTS
+                let fillColor: NSColor
+                if isLastMinute {
+                    // Create smooth fill color gradients
+                    if progress > 0.5 {
+                        // Yellow fill - smooth brightness gradient
+                        let alpha = 0.7 + pulseIntensity * 0.3
+                        fillColor = baseColor.withAlphaComponent(alpha)
+                    } else if progress > 0.2 {
+                        // Orange fill - smooth transition to yellow
+                        let transition = pulseIntensity * 0.8
+                        if transition > 0.5 {
+                            // Blend between orange and yellow
+                            let yellowAlpha = (transition - 0.5) * 2
+                            let orangeAlpha = 1.0 - yellowAlpha
+                            fillColor = NSColor.systemOrange.withAlphaComponent(0.7 + orangeAlpha * 0.3)
+                        } else {
+                            // Pure orange with brightness
+                            let alpha = 0.7 + transition * 0.3
+                            fillColor = baseColor.withAlphaComponent(alpha)
+                        }
+                    } else {
+                        // Red fill - smooth transition to orange
+                        let transition = pulseIntensity * 0.8
+                        if transition > 0.5 {
+                            // Blend between red and orange
+                            let orangeAlpha = (transition - 0.5) * 2
+                            let redAlpha = 1.0 - orangeAlpha
+                            fillColor = NSColor.systemOrange.withAlphaComponent(0.7 + orangeAlpha * 0.3)
+                        } else {
+                            // Pure red with brightness
+                            let alpha = 0.7 + transition * 0.3
+                            fillColor = baseColor.withAlphaComponent(alpha)
+                        }
+                    }
+                } else {
+                    fillColor = color
+                }
+                
+                fillColor.setFill()
                 fillPath.fill()
             }
         }
@@ -272,7 +390,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let iconY = (size.height - iconSize) / 2
         let iconRect = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
         
-        // Draw a proper white sun icon manually
+        // Draw a proper white sun icon manually - NO PULSING
         NSColor.white.set()
         
         let centerX = iconRect.midX
@@ -319,5 +437,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         
         let progress = max(0, min(1, remaining / totalDuration))
         return progress
+    }
+    
+    private func isInLastMinute() -> Bool {
+        guard let deadline = coordinator.deadline else { return false }
+        let now = clock.now
+        let remainingSeconds = deadline.timeIntervalSince(now)
+        return remainingSeconds <= 60 && remainingSeconds > 0
     }
 }
