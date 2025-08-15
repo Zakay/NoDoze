@@ -65,7 +65,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             toggleItem.title = "Turn Off"
             toggleItem.action = #selector(turnOff)
         } else {
-            toggleItem.title = "Turn On"
+            let defaultDuration = DurationConfiguration.getDefaultDuration()
+            if defaultDuration > 0 {
+                let durationText = formatDuration(minutes: defaultDuration)
+                toggleItem.title = "Activate for \(durationText)"
+            } else {
+                toggleItem.title = "Activate"
+            }
             toggleItem.action = #selector(turnOn)
         }
         toggleItem.target = self
@@ -127,7 +133,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func turnOn() {
-        coordinator.send(.userSelected(.indefinitely))
+        activateWithDefaultDuration()
     }
 
     @objc private func turnOff() {
@@ -179,6 +185,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
     
     // MARK: - Time Formatting
+    
+    private func formatDuration(minutes: Int) -> String {
+        if minutes >= 60 {
+            let hours = minutes / 60
+            let remainingMinutes = minutes % 60
+            if remainingMinutes > 0 {
+                return "\(hours)h \(remainingMinutes)m"
+            } else {
+                return "\(hours)h"
+            }
+        } else {
+            return "\(minutes)m"
+        }
+    }
     
     private func formatRemainingTime(until deadline: Date) -> String {
         let now = clock.now
