@@ -97,7 +97,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // --- Settings ---
-        let smartItem = NSMenuItem(title: "Respect Display Sleep", action: #selector(toggleSmart), keyEquivalent: "")
+        let smartItem = NSMenuItem(title: "Allow Sleep When Screens Are Off", action: #selector(toggleSmart), keyEquivalent: "")
         smartItem.target = self
         smartItem.state = coordinator.isSmartModeEnabled ? .on : .off
         menu.addItem(smartItem)

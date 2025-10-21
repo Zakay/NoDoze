@@ -18,8 +18,8 @@ NoDoze is a macOS menu bar app that gives you precise control over your Mac's sl
 ## Features
 
 - **On-Demand Activation** - Keep your Mac awake indefinitely or for a set duration (1h, 2h, 5h, or until the end of the day).
-- **Intelligent Mode** - When enabled, NoDoze automatically releases its sleep assertion if all displays are asleep (e.g., lid is closed with no external monitors). The timer continues to count down in real-time, and the app will re-evaluate its state when the Mac wakes.
-- **Simple Menu Bar Interface** - A quick left-click on the menu bar icon toggles the app on/off. A right-click reveals the full menu with all options.
+- **Allow Sleep When Screens Are Off** - When enabled, NoDoze temporarily releases its keep-awake hold whenever macOS reports that every display is asleep. The timer keeps counting down and the hold is restored when a screen wakes. Turn this off if you need headless or lid-closed sessions to stay awake.
+- **Simple Menu Bar Interface** - A quick left-click on the menu bar icon toggles the app on/off. A right-click reveals the full menu with all options, including whether the Mac may sleep when the screens are off.
 - **100% Public APIs** - Built entirely with modern, sandbox-safe APIs like `ProcessInfo.beginActivity`, ensuring stability and App Store compatibility.
 
 ## The Development Story
