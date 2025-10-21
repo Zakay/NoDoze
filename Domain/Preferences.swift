@@ -36,9 +36,13 @@ public struct DurationConfiguration {
     }
     
     public static func getDefaultDuration() -> Int {
-        let savedDuration = UserDefaults.standard.integer(forKey: Preferences.defaultActivationDuration.raw)
-        // If no saved duration or 0 (old "Indefinitely" value), return the default option's minutes
-        return savedDuration > 0 ? savedDuration : defaultOption.minutes
+        let defaults = UserDefaults.standard
+        let key = Preferences.defaultActivationDuration.raw
+        if defaults.object(forKey: key) == nil {
+            return defaultOption.minutes
+        }
+        // Preserve stored values (including 0 for indefinite or negative sentinels).
+        return defaults.integer(forKey: key)
     }
     
     public static func setDefaultDuration(_ minutes: Int) {

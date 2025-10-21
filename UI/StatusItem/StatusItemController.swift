@@ -69,8 +69,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if defaultDuration > 0 {
                 let durationText = formatDuration(minutes: defaultDuration)
                 toggleItem.title = "Activate for \(durationText)"
+            } else if defaultDuration == 0 {
+                toggleItem.title = "Activate Indefinitely"
             } else {
-                toggleItem.title = "Activate"
+                toggleItem.title = "Activate Until End of Day"
             }
             toggleItem.action = #selector(turnOn)
         }
@@ -167,8 +169,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if durationInMinutes > 0 {
             let deadline = clock.now.addingTimeInterval(TimeInterval(durationInMinutes * 60))
             coordinator.send(.userSelected(.until(deadline)))
-        } else {
+        } else if durationInMinutes == 0 {
             coordinator.send(.userSelected(.indefinitely))
+        } else {
+            endOfDay()
         }
     }
 
@@ -232,27 +236,38 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         
         displayTimer?.invalidate()
         if coordinator.assertion.isActive, coordinator.deadline != nil {
-            // Check if we're in the last minute to determine timer frequency
             let isLastMinute = isInLastMinute()
-            let timerInterval = isLastMinute ? 0.05 : 1.0 // 20Hz for last minute, 1Hz otherwise
+            let timerInterval = isLastMinute ? 0.05 : 1.0
             
             displayTimer = Timer.scheduledTimer(withTimeInterval: timerInterval, repeats: true) { [weak self] _ in
                 self?.updateMenu()
-                self?.updateIcon() // Update progress indicator and pulsing every timer tick
+                self?.updateIcon()
             }
         }
     }
 
     @objc private func updateIcon() {
-        let iconName = coordinator.assertion.isActive ? "sun.max.fill" : "moon.zzz.fill"
-        let image = NSImage(systemSymbolName: iconName, accessibilityDescription: "NoDoze")
+        let now = clock.now
+        let deadline = coordinator.deadline
+        let isExpired = deadline.map { now >= $0 } ?? false
         
-        if coordinator.assertion.isActive && coordinator.deadline != nil {
-            // Create a composite image with progress indicator
+        if isExpired, coordinator.assertion.isActive {
+            coordinator.send(.timerFired)
+            return
+        }
+        
+        let shouldShowActive = coordinator.assertion.isActive
+        let iconName = shouldShowActive ? "sun.max.fill" : "moon.zzz.fill"
+        
+        guard let image = NSImage(systemSymbolName: iconName, accessibilityDescription: "NoDoze") else {
+            item.button?.image = nil
+            return
+        }
+        
+        if shouldShowActive, coordinator.deadline != nil {
             item.button?.image = createProgressIcon(baseImage: image)
         } else {
-            // Use template for normal state
-            image?.isTemplate = true
+            image.isTemplate = true
             item.button?.image = image
         }
     }
@@ -260,33 +275,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func createProgressIcon(baseImage: NSImage?) -> NSImage? {
         guard let baseImage = baseImage else { return nil }
         
-        // Use a size that works well with the menubar
         let size = NSSize(width: 20, height: 20)
         let compositeImage = NSImage(size: size)
         
         compositeImage.lockFocus()
         
-        // Calculate progress
         let progress = calculateProgress()
         let isLastMinute = isInLastMinute()
         
-        // Calculate pulsing effect for last minute - ANIMATION
         let pulseIntensity: CGFloat
         if isLastMinute {
             let time = Date().timeIntervalSince1970
-            let pulse = sin(time * 8) * 0.5 + 0.5 // 4Hz for a pleasant animation
+            let pulse = sin(time * 8) * 0.5 + 0.5
             pulseIntensity = pulse
         } else {
             pulseIntensity = 0
         }
         
-        // Draw background progress indicator
         if progress > 0 {
-            // Create a more prominent background
             let rect = NSRect(x: 1, y: 1, width: 18, height: 18)
             let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
             
-            // Base colors
             let baseColor: NSColor
             if progress > 0.5 {
                 baseColor = NSColor.systemYellow
@@ -296,37 +305,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 baseColor = NSColor.systemRed
             }
             
-            // Apply pulsing effect to the primary color - SMOOTH GRADIENTS
             let color: NSColor
             if isLastMinute {
-                // Create smooth gradient transitions using alpha blending
                 if progress > 0.5 {
-                    // Yellow with smooth brightness gradient
-                    let alpha = 0.6 + pulseIntensity * 0.4 // Smooth alpha gradient
+                    let alpha = 0.6 + pulseIntensity * 0.4
                     color = baseColor.withAlphaComponent(alpha)
                 } else if progress > 0.2 {
-                    // Orange with smooth transition to yellow
-                    let transition = pulseIntensity * 0.8 // Smooth transition factor
+                    let transition = pulseIntensity * 0.8
                     if transition > 0.5 {
-                        // Blend between orange and yellow
-                        let yellowAlpha = (transition - 0.5) * 2 // 0 to 1
+                        let yellowAlpha = (transition - 0.5) * 2
                         let orangeAlpha = 1.0 - yellowAlpha
                         color = NSColor.systemOrange.withAlphaComponent(0.6 + orangeAlpha * 0.4)
                     } else {
-                        // Pure orange with brightness
                         let alpha = 0.6 + transition * 0.4
                         color = baseColor.withAlphaComponent(alpha)
                     }
                 } else {
-                    // Red with smooth transition to orange
-                    let transition = pulseIntensity * 0.8 // Smooth transition factor
+                    let transition = pulseIntensity * 0.8
                     if transition > 0.5 {
-                        // Blend between red and orange
-                        let orangeAlpha = (transition - 0.5) * 2 // 0 to 1
-                        let redAlpha = 1.0 - orangeAlpha
+                        let orangeAlpha = (transition - 0.5) * 2
                         color = NSColor.systemOrange.withAlphaComponent(0.6 + orangeAlpha * 0.4)
                     } else {
-                        // Pure red with brightness
                         let alpha = 0.6 + transition * 0.4
                         color = baseColor.withAlphaComponent(alpha)
                     }
@@ -335,21 +334,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 color = baseColor
             }
             
-            // Background glow effect - SMOOTH GRADIENT
             if isLastMinute {
-                let glowAlpha = 0.1 + pulseIntensity * 0.3 // Smooth background gradient
+                let glowAlpha = 0.1 + pulseIntensity * 0.3
                 let glowColor = baseColor.withAlphaComponent(glowAlpha)
                 glowColor.setFill()
                 path.fill()
             }
             
-            // Draw the border first (darker version of the color)
             let borderColor = color.withAlphaComponent(0.7)
             borderColor.setStroke()
             path.lineWidth = 1.5
             path.stroke()
             
-            // Draw the progress fill (only the filled portion) - SMOOTH GRADIENTS
             let fillRect = NSRect(
                 x: rect.minX + 1,
                 y: rect.minY + 1,
@@ -360,37 +356,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if progress > 0 {
                 let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: 2, yRadius: 2)
                 
-                // Apply pulsing to the fill color as well - SMOOTH GRADIENTS
                 let fillColor: NSColor
                 if isLastMinute {
-                    // Create smooth fill color gradients
                     if progress > 0.5 {
-                        // Yellow fill - smooth brightness gradient
                         let alpha = 0.7 + pulseIntensity * 0.3
                         fillColor = baseColor.withAlphaComponent(alpha)
                     } else if progress > 0.2 {
-                        // Orange fill - smooth transition to yellow
                         let transition = pulseIntensity * 0.8
                         if transition > 0.5 {
-                            // Blend between orange and yellow
                             let yellowAlpha = (transition - 0.5) * 2
                             let orangeAlpha = 1.0 - yellowAlpha
                             fillColor = NSColor.systemOrange.withAlphaComponent(0.7 + orangeAlpha * 0.3)
                         } else {
-                            // Pure orange with brightness
                             let alpha = 0.7 + transition * 0.3
                             fillColor = baseColor.withAlphaComponent(alpha)
                         }
                     } else {
-                        // Red fill - smooth transition to orange
                         let transition = pulseIntensity * 0.8
                         if transition > 0.5 {
-                            // Blend between red and orange
                             let orangeAlpha = (transition - 0.5) * 2
-                            let redAlpha = 1.0 - orangeAlpha
                             fillColor = NSColor.systemOrange.withAlphaComponent(0.7 + orangeAlpha * 0.3)
                         } else {
-                            // Pure red with brightness
                             let alpha = 0.7 + transition * 0.3
                             fillColor = baseColor.withAlphaComponent(alpha)
                         }
@@ -404,59 +390,36 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
         
-        // Draw the icon on top - center it properly
         let iconSize: CGFloat = 12
         let iconX = (size.width - iconSize) / 2
         let iconY = (size.height - iconSize) / 2
         let iconRect = NSRect(x: iconX, y: iconY, width: iconSize, height: iconSize)
         
-        // Draw a proper white sun icon manually - NO PULSING
-        NSColor.white.set()
-        
-        let centerX = iconRect.midX
-        let centerY = iconRect.midY
-        let innerRadius: CGFloat = 2.5
-        let rayStartRadius: CGFloat = 3.5
-        let rayEndRadius: CGFloat = 5.5
-        
-        // Draw the main sun circle first
-        let sunCircle = NSBezierPath(ovalIn: NSRect(x: centerX - innerRadius, y: centerY - innerRadius, width: innerRadius * 2, height: innerRadius * 2))
-        sunCircle.fill()
-        
-        // Draw sun rays as separate lines that don't connect to the circle
-        for i in 0..<8 {
-            let angle = Double(i) * .pi / 4
-            let rayStartX = centerX + cos(angle) * rayStartRadius
-            let rayStartY = centerY + sin(angle) * rayStartRadius
-            let rayEndX = centerX + cos(angle) * rayEndRadius
-            let rayEndY = centerY + sin(angle) * rayEndRadius
-            
-            // Create a simple straight ray line
-            let rayPath = NSBezierPath()
-            rayPath.move(to: NSPoint(x: rayStartX, y: rayStartY))
-            rayPath.line(to: NSPoint(x: rayEndX, y: rayEndY))
-            
-            rayPath.lineWidth = 1.5
-            rayPath.stroke()
-        }
+        let pointConfig = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
+        let paletteConfig = NSImage.SymbolConfiguration(paletteColors: [.white])
+        let combinedConfig = pointConfig.applying(paletteConfig)
+        let configuredSymbol = baseImage.withSymbolConfiguration(combinedConfig) ?? baseImage
+        configuredSymbol.isTemplate = false
+        configuredSymbol.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         
         compositeImage.unlockFocus()
+        compositeImage.isTemplate = false
         
         return compositeImage
     }
     
     private func calculateProgress() -> Double {
-        guard let deadline = coordinator.deadline else { return 0 }
-        guard let acquiredAt = coordinator.assertionAcquiredAt else { return 0 }
+        guard let deadline = coordinator.deadline,
+              let acquiredAt = coordinator.assertionAcquiredAt else {
+            return 0
+        }
         
-        let now = clock.now
         let totalDuration = deadline.timeIntervalSince(acquiredAt)
-        let remaining = deadline.timeIntervalSince(now)
-        
         guard totalDuration > 0 else { return 0 }
         
-        let progress = max(0, min(1, remaining / totalDuration))
-        return progress
+        let remaining = deadline.timeIntervalSince(clock.now)
+        let ratio = remaining / totalDuration
+        return max(0, min(1, ratio))
     }
     
     private func isInLastMinute() -> Bool {
