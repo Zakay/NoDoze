@@ -235,6 +235,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         updateIcon()
         
         displayTimer?.invalidate()
+        displayTimer = nil
+
+        updateMenu()
+
         if coordinator.assertion.isActive, coordinator.deadline != nil {
             let isLastMinute = isInLastMinute()
             let timerInterval = isLastMinute ? 0.05 : 1.0
