@@ -32,7 +32,19 @@ The entire development process was a deliberate learning exercise. I intentional
 
 ## Getting Started
 
-1.  Open the Xcode workspace (`NoDoze.xcodeproj`).
+**Quick install (command line):**
+
+```sh
+./install.sh
+```
+
+This builds NoDoze in Release configuration, ad-hoc signs it (no Apple Developer
+certificate required), installs it to `/Applications`, and launches it. Requires
+Xcode to be installed. Pass `--no-open` to skip launching.
+
+**Or build in Xcode:**
+
+1.  Open the Xcode project (`NoDoze.xcodeproj`).
 2.  Select the **NoDoze** scheme.
 3.  Build and run (⌘-R).
 

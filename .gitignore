@@ -3,4 +3,7 @@
 
 # Xcode
 *.xcodeproj/project.xcworkspace
-*.xcodeproj/xcuserdata/ 
+*.xcodeproj/xcuserdata/
+
+# Build output (install.sh)
+build/ 
